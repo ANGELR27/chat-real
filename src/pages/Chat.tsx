@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { v4 as uuidv4 } from "uuid";
 import "@/lib/polyfills"; // Importar polyfills antes de simple-peer
 import SimplePeer from "simple-peer";
+import { verifyMessagesTable, verifyUsersTable } from "@/utils/database";
 
 const Chat = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -49,6 +50,24 @@ const Chat = () => {
       }
     };
   }, []);
+
+  useEffect(() => {
+    // Verificar la estructura de la base de datos
+    const verifyDatabaseStructure = async () => {
+      const messagesTableOk = await verifyMessagesTable();
+      const usersTableOk = await verifyUsersTable();
+      
+      if (!messagesTableOk || !usersTableOk) {
+        toast({
+          title: "Error en la base de datos",
+          description: "Hay problemas con la estructura de la base de datos. Consulta el archivo README en la carpeta 'supabase' para obtener instrucciones sobre cómo solucionar este problema.",
+          variant: "destructive",
+        });
+      }
+    };
+    
+    verifyDatabaseStructure();
+  }, [toast]);
 
   useEffect(() => {
     if (currentUser) {
@@ -311,7 +330,7 @@ const Chat = () => {
       const { data: messages, error } = await supabase
         .from("messages")
         .select("sender_id, receiver_id, content, created_at, read")
-        .or(`sender_id.eq.${currentUser.id},receiver_id.eq.${currentUser.id}`)
+        .or(`and(sender_id.eq.${currentUser.id},receiver_id.eq.${chatId}),and(sender_id.eq.${chatId},receiver_id.eq.${currentUser.id})`)
         .order("created_at", { ascending: false });
 
       if (error) {
