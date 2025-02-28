@@ -1,15 +1,15 @@
-const { createClient } = require('@supabase/supabase-js');
-const fs = require('fs');
-const path = require('path');
+import { createClient } from '@supabase/supabase-js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-// Obtener las variables de entorno o configurarlas manualmente
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
+// Obtener el directorio actual
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-if (!supabaseUrl || !supabaseKey) {
-  console.error('Por favor, configura SUPABASE_URL y SUPABASE_SERVICE_KEY como variables de entorno');
-  process.exit(1);
-}
+// Configuración de Supabase (usando directamente las credenciales)
+const supabaseUrl = 'https://kwfdjdhovhnhuptjeuxl.supabase.co';
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt3ZmRqZGhvdmhuaHVwdGpldXhsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTczOTc2ODIyNCwiZXhwIjoyMDU1MzQ0MjI0fQ.vtpUB16Ajo4e72hCG_qKyehCryDC5nl87Zv7iKmG5Cs';
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
@@ -21,12 +21,28 @@ async function applyMigration(filename) {
 
     console.log(`Aplicando migración: ${filename}...`);
 
-    // Ejecutar la migración
+    // Ejecutar la migración directamente (sin usar rpc)
     const { error } = await supabase.rpc('exec_sql', { sql });
     
     if (error) {
       console.error(`Error al aplicar la migración ${filename}:`, error);
-      return false;
+      
+      // Intentar ejecutar la consulta SQL directamente
+      console.log('Intentando ejecutar SQL directamente...');
+      
+      // Dividir el SQL en comandos individuales
+      const commands = sql.split(';').filter(cmd => cmd.trim().length > 0);
+      
+      let allSuccessful = true;
+      for (const cmd of commands) {
+        const { error: cmdError } = await supabase.rpc('exec_sql', { sql: cmd + ';' });
+        if (cmdError) {
+          console.error(`Error ejecutando comando: ${cmd}`, cmdError);
+          allSuccessful = false;
+        }
+      }
+      
+      return allSuccessful;
     }
 
     console.log(`Migración ${filename} aplicada con éxito`);

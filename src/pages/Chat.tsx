@@ -8,9 +8,10 @@ import VideoCall from "@/components/VideoCall";
 import { User, Message, Conversation } from "@/types";
 import { useToast } from "@/hooks/use-toast";
 import { v4 as uuidv4 } from "uuid";
-import "@/lib/polyfills"; // Importar polyfills antes de simple-peer
 import SimplePeer from "simple-peer";
-import { verifyMessagesTable, verifyUsersTable } from "@/utils/database";
+import '@/lib/polyfills';
+import { verifyMessagesTable, sendMessageWithAdapter, getMessagesWithAdapter, getConversationsWithAdapter, markMessagesAsRead } from '@/utils/database_adapter';
+import { verifyDatabaseStructure } from '@/utils/database';
 
 const Chat = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -52,22 +53,18 @@ const Chat = () => {
   }, []);
 
   useEffect(() => {
-    // Verificar la estructura de la base de datos
-    const verifyDatabaseStructure = async () => {
-      const messagesTableOk = await verifyMessagesTable();
-      const usersTableOk = await verifyUsersTable();
+    const checkDatabaseStructure = async () => {
+      // Verificar la estructura de la base de datos
+      const isValid = await verifyDatabaseStructure();
       
-      if (!messagesTableOk || !usersTableOk) {
-        toast({
-          title: "Error en la base de datos",
-          description: "Hay problemas con la estructura de la base de datos. Consulta el archivo README en la carpeta 'supabase' para obtener instrucciones sobre cómo solucionar este problema.",
-          variant: "destructive",
-        });
+      if (!isValid) {
+        // Si la estructura no es válida, intentar usar el adaptador
+        await verifyMessagesTable();
       }
     };
     
-    verifyDatabaseStructure();
-  }, [toast]);
+    checkDatabaseStructure();
+  }, []);
 
   useEffect(() => {
     if (currentUser) {
@@ -94,6 +91,10 @@ const Chat = () => {
     if (currentUser && chatId) {
       loadMessages();
       loadChatUser();
+      // Marcar mensajes como leídos y luego recargar las conversaciones
+      markMessagesAsRead(currentUser.id, chatId).then(() => {
+        loadConversations();
+      });
     }
   }, [currentUser, chatId]);
 
@@ -327,72 +328,10 @@ const Chat = () => {
       console.log("Loading conversations for user:", currentUser.id);
       
       // Get all messages where the user is either sender or receiver
-      const { data: messages, error } = await supabase
-        .from("messages")
-        .select("sender_id, receiver_id, content, created_at, read")
-        .or(`and(sender_id.eq.${currentUser.id},receiver_id.eq.${chatId}),and(sender_id.eq.${chatId},receiver_id.eq.${currentUser.id})`)
-        .order("created_at", { ascending: false });
-
-      if (error) {
-        console.error("Error loading messages for conversations:", error);
-        return;
-      }
-
-      if (!messages || messages.length === 0) {
-        console.log("No messages found");
-        setConversations([]);
-        return;
-      }
-
-      console.log("Found messages:", messages.length);
-
-      // Get all user details for conversation partners
-      const partnerIds = Array.from(new Set(
-        messages.map(m => 
-          m.sender_id === currentUser.id ? m.receiver_id : m.sender_id
-        )
-      ));
-      
-      const { data: partners, error: partnersError } = await supabase
-        .from("users")
-        .select("*")
-        .in("id", partnerIds);
-        
-      if (partnersError) {
-        console.error("Error loading conversation partners:", partnersError);
-        return;
-      }
-      
-      // Group messages by conversation partner
-      const conversationsMap = new Map<string, Conversation>();
-
-      for (const message of messages) {
-        const partnerId = message.sender_id === currentUser.id 
-          ? message.receiver_id 
-          : message.sender_id;
-          
-        const partner = partners?.find(p => p.id === partnerId);
-        
-        if (!partner) continue;
-
-        if (!conversationsMap.has(partnerId)) {
-          conversationsMap.set(partnerId, {
-            id: partnerId,
-            user: partner as User,
-            last_message: message.content,
-            last_message_time: message.created_at,
-            unread_count: message.receiver_id === currentUser.id && !message.read ? 1 : 0,
-          });
-        } else if (!message.read && message.receiver_id === currentUser.id) {
-          const conversation = conversationsMap.get(partnerId)!;
-          conversation.unread_count += 1;
-        }
-      }
-
-      console.log("Mapped conversations:", Array.from(conversationsMap.values()));
-      setConversations(Array.from(conversationsMap.values()));
+      const loadedConversations = await getConversationsWithAdapter(currentUser.id);
+      setConversations(loadedConversations);
     } catch (error) {
-      console.error("Error in loadConversations:", error);
+      console.error("Error loading conversations:", error);
       toast({
         title: "Error",
         description: "No se pudieron cargar las conversaciones",
@@ -433,45 +372,10 @@ const Chat = () => {
     try {
       console.log(`Loading messages between ${currentUser.id} and ${chatId}`);
       
-      const { data, error } = await supabase
-        .from("messages")
-        .select("*")
-        .or(
-          `and(sender_id.eq.${currentUser.id},receiver_id.eq.${chatId}),and(sender_id.eq.${chatId},receiver_id.eq.${currentUser.id})`
-        )
-        .order("created_at");
-
-      if (error) {
-        console.error("Error loading messages:", error);
-        return;
-      }
-
-      console.log(`Found ${data?.length || 0} messages`);
-      setMessages(data as Message[]);
-
-      // Mark messages as read
-      const messagesToUpdate = data?.filter(
-        (m) => m.receiver_id === currentUser.id && !m.read
-      );
-      
-      if (messagesToUpdate && messagesToUpdate.length > 0) {
-        await supabase
-          .from("messages")
-          .update({ read: true })
-          .in(
-            "id",
-            messagesToUpdate.map((m) => m.id)
-          );
-
-        // Update unread count in conversations
-        setConversations((prev) =>
-          prev.map((c) =>
-            c.id === chatId ? { ...c, unread_count: 0 } : c
-          )
-        );
-      }
+      const loadedMessages = await getMessagesWithAdapter(currentUser.id, chatId);
+      setMessages(loadedMessages);
     } catch (error) {
-      console.error("Error in loadMessages:", error);
+      console.error("Error loading messages:", error);
       toast({
         title: "Error",
         description: "No se pudieron cargar los mensajes",
@@ -514,64 +418,23 @@ const Chat = () => {
     try {
       setSendingMessage(true);
       
-      const newMessage = {
-        id: uuidv4(),
-        sender_id: currentUser.id,
-        receiver_id: chatId,
-        content: content.trim() || "Archivo adjunto",
-        attachment_url: attachmentUrl,
-        attachment_type: attachmentType,
-        created_at: new Date().toISOString(),
-        read: false,
-      };
-
-      console.log("Sending message:", newMessage);
-
-      const { error } = await supabase
-        .from("messages")
-        .insert(newMessage);
+      const newMessage = await sendMessageWithAdapter(
+        content,
+        currentUser.id,
+        chatId,
+        attachmentUrl,
+        attachmentType
+      );
       
-      if (error) {
-        console.error("Error inserting message:", error);
-        throw new Error("No se pudo enviar el mensaje");
+      if (newMessage) {
+        setMessages((prev) => [...prev, newMessage]);
+      } else {
+        toast({
+          title: "Error al enviar mensaje",
+          description: "No se pudo enviar el mensaje. Inténtalo de nuevo.",
+          variant: "destructive",
+        });
       }
-
-      // Optimistically update messages
-      setMessages((prev) => [...prev, newMessage as Message]);
-
-      // Update conversations
-      setConversations((prev) => {
-        const existing = prev.find((c) => c.id === chatId);
-        if (existing) {
-          return prev.map((c) =>
-            c.id === chatId
-              ? {
-                  ...c,
-                  last_message: content.trim() || "Archivo adjunto",
-                  last_message_time: new Date().toISOString(),
-                }
-              : c
-          );
-        }
-        
-        // New conversation
-        if (activeChatUser) {
-          return [
-            {
-              id: chatId,
-              user: activeChatUser,
-              last_message: content.trim() || "Archivo adjunto",
-              last_message_time: new Date().toISOString(),
-              unread_count: 0,
-            },
-            ...prev,
-          ];
-        }
-        
-        return prev;
-      });
-      
-      return true;
     } catch (error: any) {
       console.error("Error sending message:", error);
       toast({
@@ -579,7 +442,6 @@ const Chat = () => {
         description: error.message || "No se pudo enviar el mensaje. Inténtalo de nuevo.",
         variant: "destructive",
       });
-      return false;
     } finally {
       setSendingMessage(false);
     }

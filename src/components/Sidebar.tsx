@@ -97,14 +97,14 @@ const Sidebar = ({ conversations, onlineUsers, currentUser }: SidebarProps) => {
                 )}
               >
                 <Avatar 
-                  src={conversation.user.avatar_url} 
-                  alt={conversation.user.username} 
-                  status={conversation.user.status}
+                  src={conversation.user?.avatar_url || ''} 
+                  alt={conversation.user?.username || 'Usuario'} 
+                  status={conversation.user?.status || 'offline'}
                 />
                 <div className="ml-3 flex-1 min-w-0">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                      {conversation.user.username}
+                      {conversation.user?.username || 'Usuario'}
                     </p>
                     {conversation.last_message_time && (
                       <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -112,17 +112,17 @@ const Sidebar = ({ conversations, onlineUsers, currentUser }: SidebarProps) => {
                       </p>
                     )}
                   </div>
-                  <div className="flex items-center justify-between mt-0.5">
+                  {conversation.last_message && (
                     <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                      {conversation.last_message || "No messages yet"}
+                      {conversation.last_message}
                     </p>
-                    {conversation.unread_count > 0 && (
-                      <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-semibold rounded-full bg-blue-600 text-white">
-                        {conversation.unread_count}
-                      </span>
-                    )}
-                  </div>
+                  )}
                 </div>
+                {conversation.unread_count > 0 && (
+                  <div className="ml-2 bg-blue-500 text-white text-xs font-medium rounded-full h-5 w-5 flex items-center justify-center">
+                    {conversation.unread_count}
+                  </div>
+                )}
               </div>
             ))}
           </div>
